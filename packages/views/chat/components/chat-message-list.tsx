@@ -22,6 +22,15 @@ import { TaskStatusPill } from "./task-status-pill";
 import { formatElapsedMs } from "../lib/format";
 import { useT } from "../../i18n";
 
+/** True once the server has persisted an assistant reply for this task turn. */
+function assistantReplyPersistedForTask(
+  messages: ChatMessage[],
+  pendingTaskId: string | null,
+): boolean {
+  if (!pendingTaskId) return false;
+  return messages.some((m) => m.role === "assistant" && m.task_id === pendingTaskId);
+}
+
 // ─── Public component ────────────────────────────────────────────────────
 
 interface ChatMessageListProps {
@@ -50,9 +59,8 @@ export function ChatMessageList({
   // messages list, AssistantMessage owns its rendering — suppress the live
   // timeline (and pill) to avoid rendering the same content in two places
   // during the invalidate → refetch window.
-  const pendingAlreadyPersisted = !!pendingTaskId && messages.some(
-    (m) => m.role === "assistant" && m.task_id === pendingTaskId,
-  );
+  const pendingAlreadyPersisted =
+    !!pendingTaskId && assistantReplyPersistedForTask(messages, pendingTaskId);
 
   // Live timeline for the in-flight task. useRealtimeSync keeps this cache
   // current via setQueryData on task:message events.
