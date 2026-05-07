@@ -79,6 +79,10 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverKiroModels(ctx, executablePath)
 		})
+	case "qoder":
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverQoderModels(ctx, executablePath)
+		})
 	case "opencode":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverOpenCodeModels(ctx, executablePath)
@@ -380,25 +384,35 @@ func discoverKiroModels(ctx context.Context, executablePath string) ([]Model, er
 	})
 }
 
+// discoverQoderModels spins up `qodercli --yolo --acp` and parses models from session/new.
+func discoverQoderModels(ctx context.Context, executablePath string) ([]Model, error) {
+	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "qodercli",
+		clientName:   "multica-model-discovery",
+		launchArgs:   []string{"--yolo", "--acp"},
+		tmpdirPrefix: "multica-qoder-discovery-",
+	})
+}
+
 // acpDiscoveryProvider configures how discoverACPModels launches an
 // ACP-speaking agent CLI. The shared helper drives every CLI in
 // the same way (initialize → session/new → parse models block) — the
-// per-provider differences are which binary to spawn, which env
-// vars suppress interactive prompts during init, and what to label
-// temporary work directories so they're easy to identify in logs.
+// per-provider differences are which binary to spawn, which argv
+// starts ACP (subcommand vs flag), optional env overrides, and the
+// temp directory label for logs.
 type acpDiscoveryProvider struct {
 	defaultBin   string
 	clientName   string
 	extraEnv     []string
 	tmpdirPrefix string
+	launchArgs   []string // if nil or empty, defaults to {"acp"}
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
 // implements the standard `initialize` + `session/new` flow and
 // advertises its model catalog in the response under
-// `models.availableModels` / `models.currentModelId`. This covers
-// Hermes and Kimi today; future ACP backends can plug in by adding
-// an acpDiscoveryProvider entry instead of duplicating the loop.
+// `models.availableModels` / `models.currentModelId`. Provider-specific
+// `launchArgs` select ACP mode (e.g. `acp` vs `--acp`).
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = p.defaultBin
@@ -409,7 +423,11 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, executablePath, "acp")
+	launch := p.launchArgs
+	if len(launch) == 0 {
+		launch = []string{"acp"}
+	}
+	cmd := exec.CommandContext(runCtx, executablePath, launch...)
 	hideAgentWindow(cmd)
 	if len(p.extraEnv) > 0 {
 		cmd.Env = append(os.Environ(), p.extraEnv...)
